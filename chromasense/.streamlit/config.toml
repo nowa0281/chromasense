@@ -1,0 +1,17 @@
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+
+[client]
+toolbarMode = "minimal"
+
+# Force a dark app theme (no white surfaces)
+[theme]
+base = "dark"
+primaryColor = "#5ec4a8"
+backgroundColor = "#12171f"
+secondaryBackgroundColor = "#1c2430"
+textColor = "#e6edf5"
+font = "sans serif"
