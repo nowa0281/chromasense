@@ -575,7 +575,18 @@ def inject_app_theme() -> None:
         }
         .block-container {
             padding-top: 1.25rem !important;
-            max-width: 980px;
+            padding-left: 2rem !important;
+            padding-right: 2rem !important;
+            padding-bottom: 2rem !important;
+            max-width: 100% !important;
+            width: 100% !important;
+        }
+        /* Let charts/images stretch with the viewport */
+        [data-testid="stImage"] img,
+        [data-testid="stPyplot"] img {
+            max-width: 100% !important;
+            width: 100% !important;
+            height: auto !important;
         }
 
         /* Text */
@@ -696,7 +707,18 @@ def inject_app_theme() -> None:
         }
         .cs-k-hint { color: #9aa8bc !important; font-size: 0.88rem; margin-bottom: 0.25rem; }
 
+        @media (max-width: 1100px) {
+            .block-container {
+                padding-left: 1.25rem !important;
+                padding-right: 1.25rem !important;
+            }
+        }
         @media (max-width: 768px) {
+            .block-container {
+                padding-top: 0.85rem !important;
+                padding-left: 0.85rem !important;
+                padding-right: 0.85rem !important;
+            }
             .cs-hero { padding: 1.1rem 1rem; border-radius: 16px; }
             .cs-hero h3 { font-size: 1.25rem; }
             [data-testid="stFileUploaderDropzone"] { min-height: 165px !important; }
@@ -949,19 +971,19 @@ def main() -> None:
     with right:
         st.subheader("Dominant colors")
         fig_bar = build_bar_chart(results)
-        st.pyplot(fig_bar, clear_figure=True)
+        st.pyplot(fig_bar, clear_figure=True, use_container_width=True)
         plt.close(fig_bar)
 
         st.subheader("Color palette")
         fig_swatch = build_palette_swatch(results)
-        st.pyplot(fig_swatch, clear_figure=True)
+        st.pyplot(fig_swatch, clear_figure=True, use_container_width=True)
         plt.close(fig_swatch)
 
     # --- Colour histogram (DaVinci-style scopes) ---
     st.subheader("Colour histogram")
     st.caption("RGB scope — tonal distribution of red, green, and blue channels.")
     fig_hist = build_rgb_histogram_figure(image_rgb)
-    st.pyplot(fig_hist, clear_figure=True)
+    st.pyplot(fig_hist, clear_figure=True, use_container_width=True)
     plt.close(fig_hist)
 
     st.subheader("Classified color names")
