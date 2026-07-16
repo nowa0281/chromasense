@@ -39,6 +39,8 @@ MAX_HISTORY = 12
 _SESSION_HISTORY_KEY = "report_history"
 MAX_UPLOAD_MB = 25
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+APP_DARK_BG = "#12171f"
+APP_PLOT_BG = "#0e131a"
 
 
 @st.cache_resource(show_spinner="Training color classifier…")
@@ -90,10 +92,10 @@ def store_upload(uploaded_file) -> bool:
 
 
 def _report_bar_label(result: dict) -> str:
-    """Compact dominant-color label for the JPEG report (hex + truncated name)."""
+    """Compact dominant-color label for the JPEG report (hex + short name)."""
     name = str(result["name"])
-    if len(name) > 18:
-        name = name[:17] + "…"
+    if len(name) > 14:
+        name = name[:13] + "…"
     return f"{result['hex']}\n{name}"
 
 
@@ -128,20 +130,22 @@ def build_full_report_jpeg(
     x = np.arange(256)
     n = len(results)
 
-    fig_height = 14 + max(0, n - 6) * 0.4
-    bar_row_height = max(2.8, 0.42 * n + 1.4)
-    fig = plt.figure(figsize=(13, fig_height), facecolor="#f7f7f7")
+    fig_height = 16 + max(0, n - 6) * 0.4
+    bar_row_height = max(3.6, 0.52 * n + 1.8)
+    # Table row grows with colour count so up to 8 rows always fit.
+    table_row_height = max(1.6, 0.26 * (n + 1))
+    fig = plt.figure(figsize=(16, fig_height), facecolor="#f7f7f7")
 
-    # Manual gridspec with padding so labels / titles don't collide
+    # Tight page margins; bar labels get room inside their own subplot.
     outer = fig.add_gridspec(
         5,
         1,
-        height_ratios=[0.45, 3.4, 0.95, bar_row_height, 2.5],
-        hspace=0.32,
-        left=0.16,
-        right=0.97,
-        top=0.95,
-        bottom=0.05,
+        height_ratios=[0.55, 4.2, 1.05, bar_row_height, table_row_height],
+        hspace=0.30,
+        left=0.07,
+        right=0.99,
+        top=0.98,
+        bottom=0.03,
     )
 
     # --- Header ---
@@ -153,7 +157,7 @@ def build_full_report_jpeg(
         0.0,
         0.62,
         "ChromaSense Report",
-        fontsize=18,
+        fontsize=22,
         fontweight="bold",
         color="#1a1a1a",
         va="center",
@@ -164,7 +168,7 @@ def build_full_report_jpeg(
         f"{info.get('filename', 'image')}   ·   "
         f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   ·   "
         f"k = {n_colors}",
-        fontsize=10,
+        fontsize=12,
         color="#555555",
         va="center",
     )
@@ -173,7 +177,7 @@ def build_full_report_jpeg(
     mid = outer[1].subgridspec(1, 2, width_ratios=[1.35, 1.0], wspace=0.18)
     ax_img = fig.add_subplot(mid[0, 0])
     ax_img.imshow(display_rgb)
-    ax_img.set_title("Source image", fontsize=11, pad=8, loc="left", color="#222222")
+    ax_img.set_title("Source image", fontsize=13, pad=8, loc="left", color="#222222")
     ax_img.set_xticks([])
     ax_img.set_yticks([])
     for spine in ax_img.spines.values():
@@ -183,7 +187,7 @@ def build_full_report_jpeg(
     ax_info.set_xlim(0, 1)
     ax_info.set_ylim(0, 1)
     ax_info.axis("off")
-    ax_info.set_title("Image details", fontsize=11, pad=8, loc="left", color="#222222")
+    ax_info.set_title("Image details", fontsize=13, pad=8, loc="left", color="#222222")
 
     detail_rows = [
         ("Filename", str(info.get("filename", "—"))),
@@ -213,15 +217,15 @@ def build_full_report_jpeg(
                     clip_on=False,
                 )
             )
-        ax_info.text(0.04, y, label, fontsize=9, color="#666666", va="center", fontweight="bold")
-        ax_info.text(0.42, y, value, fontsize=9, color="#1a1a1a", va="center")
+        ax_info.text(0.04, y, label, fontsize=10.5, color="#666666", va="center", fontweight="bold")
+        ax_info.text(0.42, y, value, fontsize=10.5, color="#1a1a1a", va="center")
 
     # --- Palette ---
     ax_pal = fig.add_subplot(outer[2])
     ax_pal.set_xlim(0, max(n, 1))
     ax_pal.set_ylim(0, 1.35)
     ax_pal.axis("off")
-    ax_pal.set_title("Color palette", fontsize=11, pad=6, loc="left", color="#222222")
+    ax_pal.set_title("Color palette", fontsize=13, pad=6, loc="left", color="#222222")
     for i, r in enumerate(results):
         ax_pal.add_patch(
             plt.Rectangle(
@@ -240,7 +244,7 @@ def build_full_report_jpeg(
             r["hex"],
             ha="center",
             va="center",
-            fontsize=8,
+            fontsize=9,
             color="white" if lum < 140 else "black",
             fontweight="bold",
         )
@@ -250,7 +254,7 @@ def build_full_report_jpeg(
             f"{r['percentage']:.1f}%",
             ha="center",
             va="center",
-            fontsize=8,
+            fontsize=9,
             color="#333333",
         )
         pal_name = str(r["name"])
@@ -262,12 +266,12 @@ def build_full_report_jpeg(
             pal_name,
             ha="center",
             va="bottom",
-            fontsize=7,
+            fontsize=8.5,
             color="#333333",
         )
 
-    # --- Bars + histogram ---
-    bottom = outer[3].subgridspec(1, 2, width_ratios=[1.35, 1.0], wspace=0.28)
+    # --- Bars + histogram (histogram gets slightly more width) ---
+    bottom = outer[3].subgridspec(1, 2, width_ratios=[1.05, 1.35], wspace=0.22)
 
     ax_bar = fig.add_subplot(bottom[0, 0])
     labels = [_report_bar_label(r) for r in results]
@@ -276,23 +280,23 @@ def build_full_report_jpeg(
     y_pos = list(range(n))
     bars = ax_bar.barh(y_pos, percentages, color=bar_colors, edgecolor="#333333", linewidth=0.5, height=0.72)
     ax_bar.set_yticks(y_pos)
-    ax_bar.set_yticklabels(labels, fontsize=7.5)
+    ax_bar.set_yticklabels(labels, fontsize=8.5, ha="right")
     ax_bar.invert_yaxis()
-    xmax = max(percentages) * 1.32 if percentages else 100
+    xmax = max(percentages) * 1.28 if percentages else 100
     ax_bar.set_xlim(0, xmax)
-    ax_bar.set_xlabel("Share of image (%)", fontsize=9, color="#333333", labelpad=6)
-    ax_bar.set_title("Dominant colors", fontsize=11, pad=8, loc="left", color="#222222")
-    ax_bar.tick_params(axis="x", labelsize=8, colors="#333333")
-    ax_bar.tick_params(axis="y", labelsize=7.5, colors="#222222", pad=2)
+    ax_bar.set_xlabel("Share of image (%)", fontsize=11, color="#333333", labelpad=4)
+    ax_bar.set_title("Dominant colors", fontsize=13, pad=6, loc="left", color="#222222")
+    ax_bar.tick_params(axis="x", labelsize=10, colors="#333333")
+    ax_bar.tick_params(axis="y", labelsize=8.5, colors="#222222", pad=1)
     for bar, pct, r in zip(bars, percentages, results):
-        label_x = min(bar.get_width() + xmax * 0.02, xmax * 0.97)
+        label_x = min(bar.get_width() + xmax * 0.015, xmax * 0.96)
         ax_bar.text(
             label_x,
             bar.get_y() + bar.get_height() / 2,
             f"{pct:.1f}% · {r['category']}",
             va="center",
             ha="left",
-            fontsize=7.5,
+            fontsize=8.5,
             color="#222222",
             clip_on=True,
         )
@@ -308,30 +312,54 @@ def build_full_report_jpeg(
     ax_hist.set_xlim(0, 255)
     ymax = max(max(hists["r"]), max(hists["g"]), max(hists["b"]), 1)
     ax_hist.set_ylim(0, ymax * 1.08)
-    ax_hist.set_xlabel("Level (0–255)", fontsize=9, color="#eeeeee", labelpad=8)
-    ax_hist.set_ylabel("Pixel count", fontsize=9, color="#eeeeee", labelpad=8)
-    ax_hist.set_title("RGB histogram", fontsize=11, pad=8, loc="left", color="#eeeeee")
-    ax_hist.tick_params(axis="both", labelsize=7.5, colors="#dddddd", pad=3)
+    # Title/labels/ticks sit on the light report background — use dark text for contrast.
+    ax_hist.set_xlabel("Level (0–255)", fontsize=11, color="#222222", labelpad=6, fontweight="bold")
+    ax_hist.set_ylabel("Pixel count", fontsize=11, color="#222222", labelpad=6, fontweight="bold")
+    ax_hist.set_title("RGB histogram", fontsize=13, pad=6, loc="left", color="#222222", fontweight="bold")
+    ax_hist.tick_params(axis="x", labelsize=9, colors="#333333", pad=3)
+    ax_hist.tick_params(axis="y", labelsize=9, colors="#333333", pad=3)
     ax_hist.yaxis.set_major_formatter(FuncFormatter(_format_pixel_count))
+    # Slightly expand the histogram plot area within its panel.
+    hist_pos = ax_hist.get_position()
+    ax_hist.set_position([hist_pos.x0 - 0.01, hist_pos.y0 + 0.01, hist_pos.width + 0.02, hist_pos.height + 0.02])
     for spine in ax_hist.spines.values():
-        spine.set_color("#555555")
-    legend = ax_hist.legend(loc="upper right", fontsize=8, framealpha=0.45, labelcolor="#eeeeee")
-    legend.get_frame().set_facecolor("#222222")
-    legend.get_frame().set_edgecolor("#555555")
+        spine.set_color("#333333")
+        spine.set_linewidth(1.2)
+    legend = ax_hist.legend(loc="upper right", fontsize=9, framealpha=0.85, labelcolor="#eeeeee")
+    legend.get_frame().set_facecolor("#1a1a1a")
+    legend.get_frame().set_edgecolor("#444444")
 
     # --- Classified colors table ---
     ax_tbl = fig.add_subplot(outer[4])
     ax_tbl.axis("off")
-    ax_tbl.set_title("Classified colors", fontsize=11, pad=8, loc="left", color="#222222")
+    ax_tbl.set_xlim(0, 1)
+    ax_tbl.set_ylim(0, 1)
+    ax_tbl.set_title("Classified colors", fontsize=13, pad=4, loc="left", color="#222222", y=0.98)
+    ax_tbl.add_patch(
+        plt.Rectangle(
+            (0.008, 0.02),
+            0.984,
+            0.9,
+            fill=False,
+            edgecolor="#bbbbbb",
+            linewidth=0.8,
+            transform=ax_tbl.transAxes,
+            clip_on=False,
+        )
+    )
 
     col_labels = ["#", "CSS name", "RF category", "RGB", "Hex", "Share %"]
     cell_text = []
     cell_colors = []
+    tbl_font = 9.5 if n >= 7 else 10.5
     for i, r in enumerate(results, start=1):
+        css_name = str(r["name"])
+        if len(css_name) > 20:
+            css_name = css_name[:19] + "…"
         cell_text.append(
             [
                 str(i),
-                r["name"],
+                css_name,
                 r["category"],
                 f"({r['rgb'][0]}, {r['rgb'][1]}, {r['rgb'][2]})",
                 r["hex"],
@@ -347,34 +375,35 @@ def build_full_report_jpeg(
         colLabels=col_labels,
         cellColours=cell_colors,
         colColours=["#e8e8e8"] * len(col_labels),
-        loc="upper center",
+        loc="center",
         cellLoc="center",
         colLoc="center",
+        bbox=[0.015, 0.04, 0.97, 0.86],
     )
     table.auto_set_font_size(False)
-    table.set_fontsize(9)
-    table.scale(1.0, 1.55)
+    table.set_fontsize(tbl_font)
+    row_scale = max(1.1, min(1.95, 2.35 - 0.14 * n))
+    table.scale(1.0, row_scale)
     for (row, col), cell in table.get_celld().items():
         cell.set_edgecolor("#cccccc")
-        cell.set_linewidth(0.6)
+        cell.set_linewidth(0.35)
         if row == 0:
             cell.set_text_props(fontweight="bold", color="#333333")
         # Give CSS name / category a bit more width feel via left align
         if col in (1, 2) and row > 0:
             cell._loc = "left"
-            cell.PAD = 0.04
+            cell.PAD = 0.03
 
-    fig.subplots_adjust(left=0.16, right=0.97, top=0.95, bottom=0.05, hspace=0.34)
+    fig.subplots_adjust(left=0.07, right=0.99, top=0.98, bottom=0.03, hspace=0.30)
 
     buf = io.BytesIO()
     fig.savefig(
         buf,
         format="jpeg",
-        dpi=150,
+        dpi=200,
         facecolor=fig.get_facecolor(),
-        bbox_inches="tight",
-        pad_inches=0.25,
-        pil_kwargs={"quality": 93},
+        edgecolor="none",
+        pil_kwargs={"quality": 95},
     )
     plt.close(fig)
     buf.seek(0)
@@ -467,8 +496,8 @@ def build_rgb_histogram_figure(image_rgb: np.ndarray) -> plt.Figure:
     hists = compute_rgb_histograms(image_rgb)
     x = np.arange(256)
 
-    fig, ax = plt.subplots(figsize=(9, 3.2), facecolor="#1a1a1a")
-    ax.set_facecolor("#0d0d0d")
+    fig, ax = plt.subplots(figsize=(10, 4.2), facecolor=APP_DARK_BG)
+    ax.set_facecolor(APP_PLOT_BG)
     ax.fill_between(x, hists["r"], color="#ff3344", alpha=0.45, linewidth=0)
     ax.fill_between(x, hists["g"], color="#33dd66", alpha=0.45, linewidth=0)
     ax.fill_between(x, hists["b"], color="#3399ff", alpha=0.45, linewidth=0)
@@ -476,18 +505,20 @@ def build_rgb_histogram_figure(image_rgb: np.ndarray) -> plt.Figure:
     ax.plot(x, hists["g"], color="#66ee88", linewidth=0.8, label="Green")
     ax.plot(x, hists["b"], color="#66bbff", linewidth=0.8, label="Blue")
     ax.set_xlim(0, 255)
-    ax.set_ylim(bottom=0)
-    ax.set_xlabel("Level (0–255)", color="#cccccc")
-    ax.set_ylabel("Pixel count", color="#cccccc")
-    ax.set_title("RGB Histogram (scope)", color="#eeeeee", fontsize=11)
-    ax.tick_params(colors="#aaaaaa")
+    ymax = max(max(hists["r"]), max(hists["g"]), max(hists["b"]), 1)
+    ax.set_ylim(0, ymax * 1.08)
+    ax.set_xlabel("Level (0–255)", color="#e6edf5", fontsize=11, labelpad=8)
+    ax.set_ylabel("Pixel count", color="#e6edf5", fontsize=11, labelpad=8)
+    ax.set_title("RGB Histogram (scope)", color="#e6edf5", fontsize=12, pad=10)
+    ax.tick_params(axis="both", colors="#c5d0de", labelsize=10, pad=4)
+    ax.yaxis.set_major_formatter(FuncFormatter(_format_pixel_count))
     for spine in ax.spines.values():
-        spine.set_color("#444444")
-    legend = ax.legend(loc="upper right", framealpha=0.3, labelcolor="#dddddd")
-    legend.get_frame().set_facecolor("#222222")
-    legend.get_frame().set_edgecolor("#555555")
+        spine.set_color("#2a3444")
+    legend = ax.legend(loc="upper right", framealpha=0.45, labelcolor="#e6edf5", fontsize=10)
+    legend.get_frame().set_facecolor("#1c2430")
+    legend.get_frame().set_edgecolor("#2a3444")
 
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.09, right=0.98, top=0.88, bottom=0.18)
     return fig
 
 
@@ -670,6 +701,14 @@ def inject_app_theme() -> None:
             max-width: 100% !important;
             width: 100% !important;
             height: auto !important;
+        }
+        /* Matplotlib charts — dark container to match app theme */
+        [data-testid="stPyplot"],
+        [data-testid="stPyplot"] > div {
+            background: #12171f !important;
+            border: 1px solid #2a3444 !important;
+            border-radius: 12px !important;
+            overflow: hidden !important;
         }
 
         /* Text */
