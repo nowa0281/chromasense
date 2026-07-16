@@ -15,6 +15,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
+from matplotlib.ticker import FuncFormatter
 
 # Ensure the project root is on sys.path so `src` imports work when launched
 # via `streamlit run app.py` from the chromasense directory.
@@ -88,6 +89,23 @@ def store_upload(uploaded_file) -> bool:
     return True
 
 
+def _report_bar_label(result: dict) -> str:
+    """Compact dominant-color label for the JPEG report (hex + truncated name)."""
+    name = str(result["name"])
+    if len(name) > 18:
+        name = name[:17] + "…"
+    return f"{result['hex']}\n{name}"
+
+
+def _format_pixel_count(value: float, _pos) -> str:
+    """Readable y-axis ticks for large histogram counts."""
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.0f}K"
+    return str(int(value))
+
+
 def build_full_report_jpeg(
     image_bytes: bytes,
     image_rgb: np.ndarray,
@@ -110,18 +128,20 @@ def build_full_report_jpeg(
     x = np.arange(256)
     n = len(results)
 
-    fig = plt.figure(figsize=(12, 15), facecolor="#f7f7f7")
+    fig_height = 14 + max(0, n - 6) * 0.4
+    bar_row_height = max(2.8, 0.42 * n + 1.4)
+    fig = plt.figure(figsize=(13, fig_height), facecolor="#f7f7f7")
 
     # Manual gridspec with padding so labels / titles don't collide
     outer = fig.add_gridspec(
         5,
         1,
-        height_ratios=[0.45, 3.4, 0.85, 2.6, 2.4],
-        hspace=0.28,
-        left=0.07,
-        right=0.96,
+        height_ratios=[0.45, 3.4, 0.95, bar_row_height, 2.5],
+        hspace=0.32,
+        left=0.16,
+        right=0.97,
         top=0.95,
-        bottom=0.04,
+        bottom=0.05,
     )
 
     # --- Header ---
@@ -233,32 +253,48 @@ def build_full_report_jpeg(
             fontsize=8,
             color="#333333",
         )
+        pal_name = str(r["name"])
+        if len(pal_name) > 14:
+            pal_name = pal_name[:13] + "…"
+        ax_pal.text(
+            i + 0.5,
+            1.12,
+            pal_name,
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color="#333333",
+        )
 
     # --- Bars + histogram ---
-    bottom = outer[3].subgridspec(1, 2, width_ratios=[1.15, 1.0], wspace=0.22)
+    bottom = outer[3].subgridspec(1, 2, width_ratios=[1.35, 1.0], wspace=0.28)
 
     ax_bar = fig.add_subplot(bottom[0, 0])
-    labels = [f"{r['name']} ({r['category']})" for r in results]
+    labels = [_report_bar_label(r) for r in results]
     percentages = [r["percentage"] for r in results]
     bar_colors = [tuple(c / 255.0 for c in r["rgb"]) for r in results]
     y_pos = list(range(n))
-    bars = ax_bar.barh(y_pos, percentages, color=bar_colors, edgecolor="#333333", linewidth=0.5, height=0.7)
+    bars = ax_bar.barh(y_pos, percentages, color=bar_colors, edgecolor="#333333", linewidth=0.5, height=0.72)
     ax_bar.set_yticks(y_pos)
-    ax_bar.set_yticklabels(labels, fontsize=8)
+    ax_bar.set_yticklabels(labels, fontsize=7.5)
     ax_bar.invert_yaxis()
-    xmax = max(percentages) * 1.28 if percentages else 100
+    xmax = max(percentages) * 1.32 if percentages else 100
     ax_bar.set_xlim(0, xmax)
-    ax_bar.set_xlabel("Share of image (%)", fontsize=9)
-    ax_bar.set_title("Dominant colors", fontsize=11, pad=6, loc="left", color="#222222")
-    ax_bar.tick_params(axis="x", labelsize=8)
-    for bar, pct in zip(bars, percentages):
+    ax_bar.set_xlabel("Share of image (%)", fontsize=9, color="#333333", labelpad=6)
+    ax_bar.set_title("Dominant colors", fontsize=11, pad=8, loc="left", color="#222222")
+    ax_bar.tick_params(axis="x", labelsize=8, colors="#333333")
+    ax_bar.tick_params(axis="y", labelsize=7.5, colors="#222222", pad=2)
+    for bar, pct, r in zip(bars, percentages, results):
+        label_x = min(bar.get_width() + xmax * 0.02, xmax * 0.97)
         ax_bar.text(
-            min(bar.get_width() + xmax * 0.02, xmax * 0.98),
+            label_x,
             bar.get_y() + bar.get_height() / 2,
-            f"{pct:.1f}%",
+            f"{pct:.1f}% · {r['category']}",
             va="center",
             ha="left",
-            fontsize=8,
+            fontsize=7.5,
+            color="#222222",
+            clip_on=True,
         )
 
     ax_hist = fig.add_subplot(bottom[0, 1])
@@ -270,15 +306,18 @@ def build_full_report_jpeg(
     ax_hist.plot(x, hists["g"], color="#66ee88", linewidth=0.8, label="G")
     ax_hist.plot(x, hists["b"], color="#66bbff", linewidth=0.8, label="B")
     ax_hist.set_xlim(0, 255)
-    ax_hist.set_ylim(bottom=0)
-    ax_hist.set_xlabel("Level (0–255)", fontsize=9, color="#dddddd")
-    ax_hist.set_ylabel("Pixel count", fontsize=9, color="#dddddd")
-    ax_hist.set_title("RGB histogram", fontsize=11, pad=6, loc="left", color="#222222")
-    ax_hist.tick_params(colors="#cccccc", labelsize=8)
+    ymax = max(max(hists["r"]), max(hists["g"]), max(hists["b"]), 1)
+    ax_hist.set_ylim(0, ymax * 1.08)
+    ax_hist.set_xlabel("Level (0–255)", fontsize=9, color="#eeeeee", labelpad=8)
+    ax_hist.set_ylabel("Pixel count", fontsize=9, color="#eeeeee", labelpad=8)
+    ax_hist.set_title("RGB histogram", fontsize=11, pad=8, loc="left", color="#eeeeee")
+    ax_hist.tick_params(axis="both", labelsize=7.5, colors="#dddddd", pad=3)
+    ax_hist.yaxis.set_major_formatter(FuncFormatter(_format_pixel_count))
     for spine in ax_hist.spines.values():
-        spine.set_color("#444444")
-    legend = ax_hist.legend(loc="upper right", fontsize=8, framealpha=0.35, labelcolor="#eeeeee")
+        spine.set_color("#555555")
+    legend = ax_hist.legend(loc="upper right", fontsize=8, framealpha=0.45, labelcolor="#eeeeee")
     legend.get_frame().set_facecolor("#222222")
+    legend.get_frame().set_edgecolor("#555555")
 
     # --- Classified colors table ---
     ax_tbl = fig.add_subplot(outer[4])
@@ -325,8 +364,18 @@ def build_full_report_jpeg(
             cell._loc = "left"
             cell.PAD = 0.04
 
+    fig.subplots_adjust(left=0.16, right=0.97, top=0.95, bottom=0.05, hspace=0.34)
+
     buf = io.BytesIO()
-    fig.savefig(buf, format="jpeg", dpi=150, facecolor=fig.get_facecolor(), pil_kwargs={"quality": 93})
+    fig.savefig(
+        buf,
+        format="jpeg",
+        dpi=150,
+        facecolor=fig.get_facecolor(),
+        bbox_inches="tight",
+        pad_inches=0.25,
+        pil_kwargs={"quality": 93},
+    )
     plt.close(fig)
     buf.seek(0)
     return buf.getvalue()
