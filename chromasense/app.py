@@ -8,7 +8,6 @@ Run with:
 from __future__ import annotations
 
 import io
-import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -35,8 +34,8 @@ from src.extract import (  # noqa: E402
     resize_max,
 )
 
-HISTORY_PATH = ROOT / "data" / "report_history.json"
 MAX_HISTORY = 12
+_SESSION_HISTORY_KEY = "report_history"
 
 
 @st.cache_resource(show_spinner="Training color classifier…")
@@ -405,78 +404,75 @@ def build_rgb_histogram_figure(image_rgb: np.ndarray) -> plt.Figure:
     return fig
 
 
-def load_history() -> list:
-    """Load recent analysis reports from disk (empty list if none yet)."""
-    if not HISTORY_PATH.is_file():
-        return []
-    try:
-        with open(HISTORY_PATH, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        if not isinstance(data, list):
-            return []
-        # Normalize older / partial entries so the UI never crashes
-        cleaned = []
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            top = item.get("top_colors") or []
-            if not isinstance(top, list):
-                top = []
-            cleaned.append(
-                {
-                    "timestamp": str(item.get("timestamp") or "—"),
-                    "filename": str(item.get("filename") or "untitled"),
-                    "n_colors": item.get("n_colors") or len(top) or "—",
-                    "dimensions": str(item.get("dimensions") or "—"),
-                    "mean_rgb": str(item.get("mean_rgb") or "—"),
-                    "mean_luminance": item.get("mean_luminance", "—"),
-                    "format": str(item.get("format") or "—"),
-                    "file_size_kb": item.get("file_size_kb"),
-                    "top_colors": [
-                        {
-                            "name": str(c.get("name") or "—"),
-                            "category": str(c.get("category") or "—"),
-                            "hex": str(c.get("hex") or "#888888"),
-                            "percentage": float(c.get("percentage") or 0),
-                        }
-                        for c in top
-                        if isinstance(c, dict)
-                    ],
-                }
-            )
-        return cleaned
-    except (json.JSONDecodeError, OSError, TypeError, ValueError):
-        return []
+def _normalize_history_entry(item: dict) -> dict:
+    """Normalize a history entry so the UI never crashes on partial data."""
+    top = item.get("top_colors") or []
+    if not isinstance(top, list):
+        top = []
+    return {
+        "timestamp": str(item.get("timestamp") or "—"),
+        "filename": str(item.get("filename") or "untitled"),
+        "n_colors": item.get("n_colors") or len(top) or "—",
+        "dimensions": str(item.get("dimensions") or "—"),
+        "mean_rgb": str(item.get("mean_rgb") or "—"),
+        "mean_luminance": item.get("mean_luminance", "—"),
+        "format": str(item.get("format") or "—"),
+        "file_size_kb": item.get("file_size_kb"),
+        "top_colors": [
+            {
+                "name": str(c.get("name") or "—"),
+                "category": str(c.get("category") or "—"),
+                "hex": str(c.get("hex") or "#888888"),
+                "percentage": float(c.get("percentage") or 0),
+            }
+            for c in top
+            if isinstance(c, dict)
+        ],
+    }
 
 
-def save_history(entries: list) -> None:
-    """Persist the recent-report list to data/report_history.json."""
-    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(HISTORY_PATH, "w", encoding="utf-8") as fh:
-        json.dump(entries, fh, indent=2)
+def init_report_history() -> None:
+    """Ensure per-browser session history exists (not shared across users)."""
+    if _SESSION_HISTORY_KEY not in st.session_state:
+        st.session_state[_SESSION_HISTORY_KEY] = []
+
+
+def get_report_history() -> list:
+    """Return this browser session's recent reports (cleared on hard refresh)."""
+    init_report_history()
+    return st.session_state[_SESSION_HISTORY_KEY]
+
+
+def clear_report_history() -> None:
+    """Clear recent reports for this browser session only."""
+    st.session_state[_SESSION_HISTORY_KEY] = []
 
 
 def append_history_entry(entry: dict) -> list:
     """
-    Prepend a new report to history (newest first) and keep only MAX_HISTORY.
+    Prepend a new report to this session's history (newest first).
+
+    Stored in st.session_state only — never written to disk — so each visitor
+    sees only their own reports and a hard refresh starts with empty history.
 
     Deduplicates consecutive identical filename+n_colors+top hex to avoid
     flooding history on Streamlit reruns of the same analysis.
     """
-    history = load_history()
+    history = get_report_history()
+    normalized = _normalize_history_entry(entry)
     if history:
         prev = history[0]
         same = (
-            prev.get("filename") == entry.get("filename")
-            and prev.get("n_colors") == entry.get("n_colors")
-            and prev.get("top_colors") == entry.get("top_colors")
+            prev.get("filename") == normalized.get("filename")
+            and prev.get("n_colors") == normalized.get("n_colors")
+            and prev.get("top_colors") == normalized.get("top_colors")
         )
         if same:
             return history
 
-    history.insert(0, entry)
+    history.insert(0, normalized)
     history = history[:MAX_HISTORY]
-    save_history(history)
+    st.session_state[_SESSION_HISTORY_KEY] = history
     return history
 
 
@@ -542,7 +538,7 @@ def render_history_cards(history: list, *, compact: bool = False, clear_key: str
                     st.markdown(" · ".join(lines) if len(lines) <= 3 else "  \n".join(lines))
 
     if st.button("Clear history", key=clear_key, use_container_width=True):
-        save_history([])
+        clear_report_history()
         st.rerun()
 
 
@@ -789,6 +785,10 @@ def render_landing(history: list) -> tuple:
         )
 
     st.subheader(f"Recent reports ({len(history)})")
+    st.caption(
+        "Private to this browser tab only. Other visitors cannot see your history. "
+        "Refreshing the page clears it."
+    )
     if history:
         st.caption("Past analyses on this device — palette chips and image details.")
         render_history_cards(history, compact=False, clear_key="clear_history_home")
@@ -812,7 +812,7 @@ def main() -> None:
         "Dominant color extraction (K-means) + color category classification (Random Forest)"
     )
 
-    history = load_history()
+    history = get_report_history()
 
     # --- Sidebar controls (always visible) ---
     with st.sidebar:
@@ -837,6 +837,7 @@ def main() -> None:
         st.markdown("---")
         st.caption("Upload here or on the home screen. Sidebar stays open for quick controls.")
         st.markdown("#### Recent reports")
+        st.caption("Only visible in this browser tab — cleared on refresh.")
         render_history_cards(history[:5], compact=True, clear_key="clear_history_side")
 
     # Prefer whichever uploader the user used last; persist bytes so the home

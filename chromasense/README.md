@@ -9,7 +9,7 @@ Lightweight **color detection and analysis** tool. Upload an image, extract its 
 3. **Color classification** — A Random Forest trained on a small synthetic RGB dataset predicts one of ~12 basic categories (red, blue, green, yellow, orange, purple, pink, brown, black, white, gray, cyan). Accuracy / precision / recall / F1 are shown for a held-out test split.
 4. **Visualization** — Matplotlib shows the original image, a horizontal percentage bar chart, a palette swatch strip, and a DaVinci-style RGB histogram.
 5. **Image information** — Resolution, file size, format, pixel count, mean RGB, and average luminance.
-6. **Recent reports** — Last analyses are saved under `data/report_history.json` and listed in the sidebar.
+6. **Recent reports** — Last analyses are kept in your browser session only (not saved on the server). Refreshing the page clears them.
 7. **Streamlit UI** — Sidebar uploader + color-count slider; main panel shows results.
 
 ## Project structure
