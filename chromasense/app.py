@@ -15,7 +15,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
-import streamlit.components.v1 as components
 
 # Ensure the project root is on sys.path so `src` imports work when launched
 # via `streamlit run app.py` from the chromasense directory.
@@ -53,36 +52,12 @@ def get_trained_model():
     return model, metrics, report
 
 
-def is_analysis_view() -> bool:
-    """True when the URL marks the analysis screen (?view=analysis)."""
-    return st.query_params.get("view") == "analysis"
-
-
-def set_analysis_view() -> None:
-    """Mark the analysis screen in the URL so browser Back returns home first."""
-    st.query_params["view"] = "analysis"
-
-
-def clear_analysis_view() -> None:
-    if "view" in st.query_params:
-        del st.query_params["view"]
-
-
 def go_home() -> None:
     """Return to the home/upload screen without leaving the app."""
-    for key in ("img_bytes", "img_name"):
+    for key in ("img_bytes", "img_name", "_last_upload_key"):
         st.session_state.pop(key, None)
-    clear_analysis_view()
-
-
-def sync_view_from_url() -> None:
-    """
-    If the user pressed browser Back (URL no longer has view=analysis),
-    drop the active image and show the home screen.
-    """
-    if not is_analysis_view() and st.session_state.get("img_bytes"):
-        st.session_state.pop("img_bytes", None)
-        st.session_state.pop("img_name", None)
+    st.session_state["home_upload_gen"] = st.session_state.get("home_upload_gen", 0) + 1
+    st.session_state["side_upload_gen"] = st.session_state.get("side_upload_gen", 0) + 1
 
 
 def store_upload(uploaded_file) -> bool:
@@ -95,6 +70,10 @@ def store_upload(uploaded_file) -> bool:
         return False
 
     data = uploaded_file.getvalue()
+    upload_key = f"{uploaded_file.name}:{len(data)}"
+    if st.session_state.get("_last_upload_key") == upload_key:
+        return False
+
     size_mb = len(data) / (1024 * 1024)
     if len(data) > MAX_UPLOAD_BYTES:
         st.error(
@@ -105,56 +84,8 @@ def store_upload(uploaded_file) -> bool:
 
     st.session_state["img_bytes"] = data
     st.session_state["img_name"] = uploaded_file.name
-    set_analysis_view()
+    st.session_state["_last_upload_key"] = upload_key
     return True
-
-
-def inject_mobile_back_support() -> None:
-    """
-    Seed browser history so Back from analysis lands on home first (mobile).
-
-    Pushes a home entry, then analysis, so the first Back goes to home instead
-    of closing the tab when the app was opened directly.
-    """
-    components.html(
-        """
-        <script>
-        (function () {
-            const w = window.parent;
-            if (!w || !w.location || !w.history) return;
-            if (w.sessionStorage.getItem("csHistoryReady") === "1") return;
-
-            const homeUrl = w.location.pathname;
-            const analysisUrl = homeUrl + "?view=analysis";
-            w.history.replaceState({ csView: "home" }, "", homeUrl);
-            w.history.pushState({ csView: "analysis" }, "", analysisUrl);
-            w.sessionStorage.setItem("csHistoryReady", "1");
-
-            w.addEventListener("popstate", function () {
-                const onAnalysis = w.location.search.indexOf("view=analysis") !== -1;
-                if (!onAnalysis) {
-                    w.sessionStorage.removeItem("csHistoryReady");
-                }
-            });
-        })();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
-
-
-def reset_mobile_history_seed() -> None:
-    """Allow a fresh browser Back stack the next time analysis opens."""
-    components.html(
-        """
-        <script>
-        window.parent.sessionStorage.removeItem("csHistoryReady");
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
 
 
 def build_full_report_jpeg(
@@ -870,7 +801,7 @@ def render_landing(history: list) -> tuple:
     home_upload = st.file_uploader(
         "Upload image",
         type=["jpg", "jpeg", "png"],
-        key="home_upload",
+        key=f"home_upload_{st.session_state.get('home_upload_gen', 0)}",
         label_visibility="collapsed",
         help=f"JPG or PNG from camera roll or files (max {MAX_UPLOAD_MB} MB)",
     )
@@ -927,7 +858,6 @@ def main() -> None:
         initial_sidebar_state="expanded",  # keep left sidebar always open
     )
     inject_app_theme()
-    sync_view_from_url()
 
     st.title("ChromaSense")
     st.caption(
@@ -943,7 +873,7 @@ def main() -> None:
         side_upload = st.file_uploader(
             "Upload an image (JPG / PNG)",
             type=["jpg", "jpeg", "png"],
-            key="side_upload",
+            key=f"side_upload_{st.session_state.get('side_upload_gen', 0)}",
             help=f"Maximum file size: {MAX_UPLOAD_MB} MB",
         )
         default_k = int(st.session_state.get("n_colors", 8))
@@ -985,16 +915,10 @@ def main() -> None:
     has_image = "img_bytes" in st.session_state and st.session_state["img_bytes"]
 
     if not has_image:
-        reset_mobile_history_seed()
         home_upload, n_colors = render_landing(history)
         if store_upload(home_upload):
             st.rerun()
         return
-
-    if not is_analysis_view():
-        set_analysis_view()
-
-    inject_mobile_back_support()
 
     # Active image from session (home or sidebar)
     image_bytes = st.session_state["img_bytes"]
@@ -1002,12 +926,11 @@ def main() -> None:
     n_colors = int(st.session_state.get("n_colors", 8))
     n_colors = max(3, min(16, n_colors))
 
-    # Return to home first (browser Back does the same via ?view=analysis URL sync)
+    # Return to home without leaving the app (use this instead of browser Back on mobile).
     st.markdown('<div class="cs-back-home-marker"></div>', unsafe_allow_html=True)
     clear_col, _ = st.columns([1, 3])
     with clear_col:
         if st.button("← Back to home", use_container_width=True):
-            reset_mobile_history_seed()
             go_home()
             st.rerun()
 
