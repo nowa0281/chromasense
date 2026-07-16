@@ -15,6 +15,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
+import streamlit.components.v1 as components
 
 # Ensure the project root is on sys.path so `src` imports work when launched
 # via `streamlit run app.py` from the chromasense directory.
@@ -36,6 +37,8 @@ from src.extract import (  # noqa: E402
 
 MAX_HISTORY = 12
 _SESSION_HISTORY_KEY = "report_history"
+MAX_UPLOAD_MB = 25
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
 
 @st.cache_resource(show_spinner="Training color classifier…")
@@ -48,6 +51,110 @@ def get_trained_model():
     """
     model, metrics, report = ensure_dataset_and_print_metrics()
     return model, metrics, report
+
+
+def is_analysis_view() -> bool:
+    """True when the URL marks the analysis screen (?view=analysis)."""
+    return st.query_params.get("view") == "analysis"
+
+
+def set_analysis_view() -> None:
+    """Mark the analysis screen in the URL so browser Back returns home first."""
+    st.query_params["view"] = "analysis"
+
+
+def clear_analysis_view() -> None:
+    if "view" in st.query_params:
+        del st.query_params["view"]
+
+
+def go_home() -> None:
+    """Return to the home/upload screen without leaving the app."""
+    for key in ("img_bytes", "img_name"):
+        st.session_state.pop(key, None)
+    clear_analysis_view()
+
+
+def sync_view_from_url() -> None:
+    """
+    If the user pressed browser Back (URL no longer has view=analysis),
+    drop the active image and show the home screen.
+    """
+    if not is_analysis_view() and st.session_state.get("img_bytes"):
+        st.session_state.pop("img_bytes", None)
+        st.session_state.pop("img_name", None)
+
+
+def store_upload(uploaded_file) -> bool:
+    """
+    Validate size, store bytes in session, and enter analysis view.
+
+    Returns True when the upload was accepted.
+    """
+    if uploaded_file is None:
+        return False
+
+    data = uploaded_file.getvalue()
+    size_mb = len(data) / (1024 * 1024)
+    if len(data) > MAX_UPLOAD_BYTES:
+        st.error(
+            f"**{uploaded_file.name}** is {size_mb:.1f} MB. "
+            f"Maximum upload size is **{MAX_UPLOAD_MB} MB**."
+        )
+        return False
+
+    st.session_state["img_bytes"] = data
+    st.session_state["img_name"] = uploaded_file.name
+    set_analysis_view()
+    return True
+
+
+def inject_mobile_back_support() -> None:
+    """
+    Seed browser history so Back from analysis lands on home first (mobile).
+
+    Pushes a home entry, then analysis, so the first Back goes to home instead
+    of closing the tab when the app was opened directly.
+    """
+    components.html(
+        """
+        <script>
+        (function () {
+            const w = window.parent;
+            if (!w || !w.location || !w.history) return;
+            if (w.sessionStorage.getItem("csHistoryReady") === "1") return;
+
+            const homeUrl = w.location.pathname;
+            const analysisUrl = homeUrl + "?view=analysis";
+            w.history.replaceState({ csView: "home" }, "", homeUrl);
+            w.history.pushState({ csView: "analysis" }, "", analysisUrl);
+            w.sessionStorage.setItem("csHistoryReady", "1");
+
+            w.addEventListener("popstate", function () {
+                const onAnalysis = w.location.search.indexOf("view=analysis") !== -1;
+                if (!onAnalysis) {
+                    w.sessionStorage.removeItem("csHistoryReady");
+                }
+            });
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def reset_mobile_history_seed() -> None:
+    """Allow a fresh browser Back stack the next time analysis opens."""
+    components.html(
+        """
+        <script>
+        window.parent.sessionStorage.removeItem("csHistoryReady");
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 def build_full_report_jpeg(
@@ -718,6 +825,18 @@ def inject_app_theme() -> None:
             .cs-hero { padding: 1.1rem 1rem; border-radius: 16px; }
             .cs-hero h3 { font-size: 1.25rem; }
             [data-testid="stFileUploaderDropzone"] { min-height: 165px !important; }
+            div[data-testid="stVerticalBlock"]:has(.cs-back-home-marker) {
+                position: sticky;
+                top: 0.35rem;
+                z-index: 999;
+                background: #12171f;
+                padding-bottom: 0.35rem;
+                margin-bottom: 0.25rem;
+            }
+            div[data-testid="stVerticalBlock"]:has(.cs-back-home-marker) .stButton > button {
+                min-height: 2.75rem !important;
+                font-weight: 650 !important;
+            }
         }
         </style>
         """,
@@ -747,12 +866,13 @@ def render_landing(history: list) -> tuple:
     )
 
     st.markdown("**Upload**")
+    st.caption(f"JPG or PNG · max {MAX_UPLOAD_MB} MB")
     home_upload = st.file_uploader(
         "Upload image",
         type=["jpg", "jpeg", "png"],
         key="home_upload",
         label_visibility="collapsed",
-        help="JPG or PNG from camera roll or files",
+        help=f"JPG or PNG from camera roll or files (max {MAX_UPLOAD_MB} MB)",
     )
 
     default_k = int(st.session_state.get("n_colors", 8))
@@ -807,6 +927,8 @@ def main() -> None:
         initial_sidebar_state="expanded",  # keep left sidebar always open
     )
     inject_app_theme()
+    sync_view_from_url()
+
     st.title("ChromaSense")
     st.caption(
         "Dominant color extraction (K-means) + color category classification (Random Forest)"
@@ -817,10 +939,12 @@ def main() -> None:
     # --- Sidebar controls (always visible) ---
     with st.sidebar:
         st.header("Controls")
+        st.caption(f"JPG/PNG · max {MAX_UPLOAD_MB} MB")
         side_upload = st.file_uploader(
             "Upload an image (JPG / PNG)",
             type=["jpg", "jpeg", "png"],
             key="side_upload",
+            help=f"Maximum file size: {MAX_UPLOAD_MB} MB",
         )
         default_k = int(st.session_state.get("n_colors", 8))
         default_k = max(3, min(16, default_k))
@@ -843,8 +967,8 @@ def main() -> None:
     # Prefer whichever uploader the user used last; persist bytes so the home
     # widget can disappear without losing the active image.
     if side_upload is not None:
-        st.session_state["img_bytes"] = side_upload.getvalue()
-        st.session_state["img_name"] = side_upload.name
+        if store_upload(side_upload):
+            st.rerun()
 
     # Train / load classifier (cached)
     model, metrics, report = get_trained_model()
@@ -861,12 +985,16 @@ def main() -> None:
     has_image = "img_bytes" in st.session_state and st.session_state["img_bytes"]
 
     if not has_image:
+        reset_mobile_history_seed()
         home_upload, n_colors = render_landing(history)
-        if home_upload is not None:
-            st.session_state["img_bytes"] = home_upload.getvalue()
-            st.session_state["img_name"] = home_upload.name
+        if store_upload(home_upload):
             st.rerun()
         return
+
+    if not is_analysis_view():
+        set_analysis_view()
+
+    inject_mobile_back_support()
 
     # Active image from session (home or sidebar)
     image_bytes = st.session_state["img_bytes"]
@@ -874,12 +1002,13 @@ def main() -> None:
     n_colors = int(st.session_state.get("n_colors", 8))
     n_colors = max(3, min(16, n_colors))
 
-    # Allow starting over from the analysis view (handy on phone)
+    # Return to home first (browser Back does the same via ?view=analysis URL sync)
+    st.markdown('<div class="cs-back-home-marker"></div>', unsafe_allow_html=True)
     clear_col, _ = st.columns([1, 3])
     with clear_col:
-        if st.button("← New image", use_container_width=True):
-            for key in ("img_bytes", "img_name"):
-                st.session_state.pop(key, None)
+        if st.button("← Back to home", use_container_width=True):
+            reset_mobile_history_seed()
+            go_home()
             st.rerun()
 
     try:
